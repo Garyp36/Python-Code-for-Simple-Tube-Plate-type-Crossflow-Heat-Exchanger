@@ -1,0 +1,303 @@
+import math
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+# Constants and known parameters
+# Water properties
+Vw_list = [0.00625, 0.0125, 0.025, 0.05, 0.1, 0.2]  # m/s
+#Vw_list = [0.00625, 0.00625, 0.00625, 0.00625, 0.00625, 0.00625]  # m/s
+#Vw_list = [0.2, 0.2, 0.2, 0.2, 0.2, 0.2]  # m/s
+Twi = 355.15  # K
+Cpw = 4182  # J/kg.K
+rho_w = 998.2  # kg/m³
+Prw = 6.904  # dimensionless
+kw = 0.6  # W/m.K
+mu_w = 0.001003  # Pa.s (dynamic viscosity)
+
+# Air properties
+Va_list = [12, 12, 12, 12, 12, 12]  # m/s
+#Va_list = [24, 24, 24, 24, 24, 24]  # m/s
+#Va_list = [0.75, 1.5, 3, 6, 12, 24]  # m/s
+
+Tai = 297.15  # K
+Cpa = 1006.43  # J/kg.K
+rho_a = 1.225  # kg/m³
+Pra = 0.7156  # dimensionless
+ka = 0.0242  # W/m.K
+mu_a = 1.7894e-5  # Pa.s (dynamic viscosity)
+
+# Tube geometrical and material details
+Tl = 0.25  # m, Length of Tube
+Th = 0.01  # m, Height of Tube section
+Tw = 0.05 # m, Width of Tube section
+Tt = 0.0005  # m, thickness of tube
+Nt = 5  # nos.
+
+# Plate geometrical and material details
+Tp = 0.005  # m, Thickness of Plate
+Ph = 0.23  # m, Height of Plate
+Pw = 0.055  # m, Width of Plate
+kp = 202.4  # W/m.K, Thermal Conductivity of Plate
+Np = 5  # nos., Number of Plates
+
+# Spacing and offsets
+St = ((Ph/(Nt+1))-(Th)) # m, Spacing between Tubes
+Sp = (Tl/(Np+1))-Tp # m, Spacing between Plates
+
+# Plate offsets in front view
+plate_offset_x_front = 0.05 # m
+plate_offset_y_front = 0.01 # m
+
+# Tube offsets in front view
+tube_offset_y_front = 0.01 + (Th/2) + St # m
+tube_offset_x_front = plate_offset_x_front - Sp - (Tp/2) # m
+
+# Spacing between tubes along the vertical axis
+vertical_spacing = St
+
+# Number of tubes along the vertical axis
+num_tubes_vertical = Nt
+
+# Number of plates in front view
+num_plates = Np
+
+# Spacing between plates
+plate_spacing_horizontal = Sp
+
+# Tube and plate offsets in side view
+tube_offset_x_side = 0.075 - (Tw / 2 ) # m
+plate_offset_x_side = 0.075- (Pw / 2 ) # m
+
+# CFD results from ANSYS
+Water_out_temps_ansys = [346.50, 350.32, 352.27, 353.34, 354.05, 354.55] # K
+air_out_temps_ansys = [296.93, 296.90, 296.88, 296.86, 296.84, 296.82] # K
+
+# Lists to store results
+calculated_Water_out_temps = []
+cfd_Water_out_temps = []
+calculated_air_out_temps = []
+cfd_air_out_temps = []
+effectiveness_values = []
+heat_transfer_rates = []
+
+# Function to calculate friction factor
+def friction_factor(Re):
+    return (0.79 * math.log(Re) - 1.64) ** -2
+
+# Iterate over the different Water inlet velocities
+for index, Vw in enumerate(Vw_list):
+    v_air_in = Va_list[index]
+
+    # Calculate heat transfer area for the Water side
+    Pt = (math.pi * Th) + (2 * (Tw - Th))  # m, wetted perimeter
+    At = Nt * Pt * Tl  # m², surface area of all tubes
+    Act = (((Tw - Th) * Th) + (
+                (math.pi / 4) * (Th ** 2)))  # m², cross-sectional area of tube
+
+    # Calculate heat transfer area for the air side
+    Ap = Np * (2 * ((Pw * Ph) + (Tp * Ph) + (
+                Pw * Tp)))  # m², surface area of all plates
+    Ar = At + Ap - (Nt * Np * Pt * Tp)  # m², total surface area of Radiator
+    St = (Ph / (Nt + 1)) - (Th)  # spacing between tubes
+    Sp = (Tl / (Np + 1)) - (Tp)  # spacing between plates
+    Apa = (St * Sp) * (((Nt - 1) * (Np - 1)) + (2 * (Np - 1) * (3 / 4)) \
+                + (2 * (Nt - 1) * (3 / 4)) + 2)  # Ph * Tl # m², surface area of all tubes
+    Awpa = (2 * (St + Sp)) * (((Nt - 1) * (Np - 1)) + (2 * (Np - 1) * (3 / 4)) + (
+                2 * (Nt - 1) * (3 / 4)) + 2)  # wetted perimeter
+
+    # Calculate hydraulic diameter for Water and air
+    Dht = (4 * Act) / Pt # m
+    Dha = (4 * Apa) / Awpa # m
+
+    # Reynolds number for Water
+    Rew = (rho_w * Vw * Dht) / mu_w
+
+    # Reynolds number for air
+    Rea = (rho_a * v_air_in * Dha) / mu_a
+
+    # Nusselt number calculation for Water
+    if Rew < 2300 and 0.5 < Prw < 100:
+        Nuw = 8.54 * (1 - ((1.27 * Th) / Tw))  # Shah and London
+    elif 2300 < Rew < 10 ** 4 and 0.5 < Prw < 2000: #and (Tl / Dht) > 10:  # Gnielinski Equation
+        f = friction_factor(Rew)
+        Nuw = ((f / 8) * (Rew - 1000) * Prw) / (1 + 12.7 * (f / 8) ** 0.5 * (Prw ** (2 / 3) - 1))
+    elif 10 ** 4 < Rew < 5 * 10 ** 6 and 0.5 < Prw < 2000:# and (Tl / Dht) > 10:  # Petukhov Equation
+        f = friction_factor(Rew)
+        Nuw = ((f / 8) * Rew * Prw) / (1.07 + 12.7 * (f / 8) ** 0.5 * (Prw ** (2 / 3) - 1))
+    elif Rew > 10 ** 4 and 0.7 < Prw < 160:# and (Tl / Dht) > 60:
+        Nuw = 0.023 * Rew ** 0.8 * Prw ** (1 / 3)
+    else:
+        Nuw = None  # Conditions not met
+
+    # Nusselt number for air
+    if Rea < 2300:
+        Nua = 1.86 * ((Rea * Pra / Pw) ** (1 / 3))
+    else:
+        Nua = 0.664 * Rea ** 0.5 * Pra ** (1 / 3)
+
+    # Heat transfer coefficients
+    hw = Nuw * kw / Dht  # W/m2K
+    ha = Nua * ka / Dha  # W/m2K
+
+    # Coefficient for calculating efficiency
+    m = math.sqrt(2 * ha / (kp * Tp))
+
+    # Corrected fin length
+    Lc = Ph  # m
+
+    # Fin efficiency
+    nf = math.tanh(m * Lc) / (m * Lc)
+
+    # Single fin surface area
+    Ap1 = ((2 * ((Pw * Ph) + (Tp * Ph) + (
+                Pw * Tp)))) - (Np * Pt * Tp)  # m²
+
+    # Base surface area
+    Ab = Ar  # m²
+
+    # Overall surface efficiency
+    n0 = 1 - ((Np * Ap1 / Ab) * (1 - nf))
+
+    # Overall heat transfer coefficient (U)
+    UA = (1 / ((1 / (n0 * ha * Ar)) + (1 / (hw * At))))
+
+    # Heat capacity rates
+    Cw = rho_w * Vw * Act * Nt * Cpw
+    Ca = rho_a * v_air_in * 10 * Tl * Ph * Cpa
+
+    C_min = min(Cw, Ca)
+    C_max = max(Cw, Ca)
+    Cr = C_min / C_max
+
+    # Number of Transfer Units (NTU)
+    NTU = (UA)  / C_min #* Ar
+
+    # Effectiveness (ε) for crossflow heat exchanger with both fluids unmixed
+    effectiveness = 1 - (math.exp(((1 / Cr) * (NTU ** (0.22))) * ((math.exp(-Cr * (NTU ** 0.78))) - 1)))
+    #effectiveness = 1 - (math.exp(-NTU))
+
+    # Heat transfer rate (Q)
+    Q = effectiveness * C_min * (Twi - Tai)  # W
+
+    # Outlet temperatures
+    Two = Twi - (Q / Cw)  # K
+    Tao = Tai + (Q / Ca)  # K
+
+    # Store results
+    calculated_Water_out_temps.append(Two)
+    calculated_air_out_temps.append(Tao)
+    effectiveness_values.append(effectiveness)
+    heat_transfer_rates.append(Q)
+
+# CFD results from ANSYS
+cfd_Water_out_temps = Water_out_temps_ansys
+cfd_air_out_temps = air_out_temps_ansys
+
+# Print results in a table format
+# Prepare data for table
+data = [
+    ["Vw (m/s)"] + [f"{v:.4f}" for v in Vw_list],
+    ["v_air_in (m/s)"] + [f"{v:.4f}" for v in Va_list],
+    ["(Numerical) Water Outlet Temp (K)"] + [f"{temp:.2f}" for temp in calculated_Water_out_temps],
+    ["(CFD) Water Outlet Temp (K)"] + [f"{temp:.2f}" for temp in Water_out_temps_ansys],
+    ["(Numerical) Air Outlet Temp (K)"] + [f"{temp:.2f}" for temp in calculated_air_out_temps],
+    ["(CFD) Air Outlet Temp (K)"] + [f"{temp:.2f}" for temp in air_out_temps_ansys],
+    ["Effectiveness"] + [f"{eff:.2f}" for eff in effectiveness_values],
+    ["Heat Transfer Rate (W)"] + [f"{q:.2f}" for q in heat_transfer_rates]
+]
+
+# Find maximum length of each column for formatting
+col_widths = [max(len(str(item)) for item in col) for col in zip(*data)]
+
+# Print the table
+for row in data:
+    print(" | ".join(f"{item:>{width}}" for item, width in zip(row, col_widths)))
+
+# Plot results
+plt.figure(figsize=(14, 8))
+
+# Water Outlet Temperature Comparison
+plt.subplot(2, 1, 1)
+plt.plot(Vw_list, Water_out_temps_ansys, 'ro-', label='ANSYS CFD')
+plt.plot(Vw_list, calculated_Water_out_temps, 'bo-', label='Numerical Calculation')
+for i, txt in enumerate(Water_out_temps_ansys):
+    plt.annotate(f'{txt:.2f}', (Vw_list[i], Water_out_temps_ansys[i]), textcoords="offset points", xytext=(0,-20), ha='center')
+for i, txt in enumerate(calculated_Water_out_temps):
+    plt.annotate(f'{txt:.2f}', (Vw_list[i], calculated_Water_out_temps[i]), textcoords="offset points", xytext=(0,12), ha='center')
+plt.xlabel('Water Inlet Velocity (m/s)')
+plt.ylabel('Water Outlet Temperature (K)')
+plt.ylim([335, 365])  # Adjust the y-axis limits here
+plt.title('Comparison of Water Outlet Temperatures')
+plt.legend()
+plt.grid(True)
+
+# Air Outlet Temperature Comparison
+plt.subplot(2, 1, 2)
+plt.plot(Vw_list, air_out_temps_ansys, 'ro-', label='ANSYS CFD')
+plt.plot(Vw_list, calculated_air_out_temps, 'bo-', label='Numerical Calculation')
+for i, txt in enumerate(air_out_temps_ansys):
+    plt.annotate(f'{txt:.2f}', (Vw_list[i], air_out_temps_ansys[i]), textcoords="offset points", xytext=(0,-15), ha='center')
+for i, txt in enumerate(calculated_air_out_temps):
+    plt.annotate(f'{txt:.2f}', (Vw_list[i], calculated_air_out_temps[i]), textcoords="offset points", xytext=(0,15), ha='center')
+plt.xlabel('Water Inlet Velocity (m/s)')
+plt.ylabel('Air Outlet Temperature (K)')
+plt.ylim([295.5, 298.5])  # Adjust the y-axis limits here
+plt.title('Comparison of Air Outlet Temperatures')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout(h_pad=3.0)
+
+# Plot Heat Exchanger Layout
+
+# Create the plot
+fig, ax = plt.subplots(1, 2, figsize=(12, 6))  # Adjusted plot size to fit the geometry
+ax[0].set_aspect('equal')
+ax[1].set_aspect('equal')
+
+# Draw tubes in front view
+for i in range(num_tubes_vertical):
+    y_offset = tube_offset_y_front + i * (Th + vertical_spacing)
+    ax[0].add_patch(patches.Rectangle((tube_offset_x_front, y_offset), Tl, Th, edgecolor='blue', facecolor='none'))
+
+# Draw plates in front view
+for i in range(num_plates):
+    x_offset = plate_offset_x_front + i * (Tp + plate_spacing_horizontal)
+    ax[0].add_patch(patches.Rectangle((x_offset, plate_offset_y_front), Tp, Ph, edgecolor='red', facecolor='none'))
+
+# Draw tubes in side view
+for i in range(num_tubes_vertical):
+    y_offset = tube_offset_y_front + i * (Th + vertical_spacing)
+    ax[1].add_patch(patches.Rectangle((tube_offset_x_side, y_offset), Tw, Th, edgecolor='blue', facecolor='none'))
+
+# Draw vertical plate in side view
+x_offset_plate_side = plate_offset_x_side
+y_offset_plate_side = plate_offset_y_front
+ax[1].add_patch(patches.Rectangle((x_offset_plate_side, y_offset_plate_side), Pw, Ph, edgecolor='red', facecolor='none'))
+
+# Set labels and titles for front view
+ax[0].set_xlabel('X axis')
+ax[0].set_ylabel('Y axis')
+ax[0].set_title('Front View of Crossflow Radiator')  # view name
+ax[0].set_xlim(0, 0.3)  # Adjusted X-axis limit
+ax[0].set_ylim(0, 0.275)  # Adjusted Y-axis limit
+ax[0].minorticks_on()
+ax[0].grid(which='both', axis='both', linestyle='--', alpha=0.5)
+
+# Set labels and titles for side view
+ax[1].set_xlabel('Z axis')
+ax[1].set_ylabel('Y axis')
+ax[1].set_title('Right Side View of Crossflow Radiator')  # view name
+ax[1].set_xlim(0, 0.15)  # Adjusted X-axis limit
+ax[1].set_ylim(0, 0.275)  # Adjusted Y-axis limit
+ax[1].minorticks_on()
+ax[1].grid(which='both', axis='both', linestyle='--', alpha=0.5)
+
+# Adjust spacing between subplots
+plt.subplots_adjust(wspace=0.5)  # Increase or decrease as needed
+
+# Adjust vertical space for the side view title
+plt.tight_layout(rect=[0, 0, 1, 1])  # Increase bottom value to create more space for the title
+
+plt.tight_layout(h_pad=3.0)
+plt.show()
